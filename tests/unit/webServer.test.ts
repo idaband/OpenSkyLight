@@ -20,7 +20,8 @@ describe('web server', () => {
 
     async function boot(
         dispatchImpl?: (channel: IpcChannel, payload: unknown) => Promise<unknown>,
-        surface: ApiSurface = 'lan'
+        surface: ApiSurface = 'lan',
+        googleOAuthCallback?: (callbackUrl: string) => Promise<{email: string}>
     ): Promise<{ base: string; seen: { channel: IpcChannel; payload: unknown }[] }> {
         staticRoot = mkdtempSync(join(tmpdir(), 'osl-web-'))
         mkdirSync(join(staticRoot, 'assets'))
@@ -33,6 +34,7 @@ describe('web server', () => {
             staticRoot,
             version: '0.0.0-test',
             surface,
+            googleOAuthCallback,
             verifyToken: (token) => token === 'paired-device-token',
             rpcDispatch: async (channel, payload) => {
                 seen.push({channel, payload})
@@ -106,6 +108,24 @@ describe('web server', () => {
 
         const sneaky = await fetch(`${base}/..%2f..%2fpackage.json`)
         expect([403, 404]).toContain(sneaky.status)
+    })
+
+    it('completes LAN Google OAuth callbacks and keeps the route off DMZ', async () => {
+        const callbacks: string[] = []
+        const {base} = await boot(undefined, 'lan', async (callbackUrl) => {
+            callbacks.push(callbackUrl)
+            return {email: 'family@example.com'}
+        })
+
+        const callback = await fetch(`${base}/api/google/oauth/callback?code=abc&state=xyz`)
+        expect(callback.status).toBe(200)
+        expect(await callback.text()).toContain('family@example.com')
+        expect(callbacks).toEqual([`${base}/api/google/oauth/callback?code=abc&state=xyz`])
+
+        await new Promise<void>((resolve) => server?.close(() => resolve()))
+        const dmz = await boot(undefined, 'dmz', async () => ({email: 'blocked@example.com'}))
+        const blocked = await fetch(`${dmz.base}/api/google/oauth/callback?code=abc&state=xyz`)
+        expect(blocked.status).toBe(404)
     })
 
     it('dmz surface blocks static UI and non-allowlisted channels', async () => {

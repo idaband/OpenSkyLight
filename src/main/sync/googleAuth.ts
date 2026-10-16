@@ -2,7 +2,6 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { AddressInfo } from 'node:net'
 import { OAuth2Client, CodeChallengeMethod } from 'google-auth-library'
-import { safeStorage, shell } from 'electron'
 import { and, eq, isNull } from 'drizzle-orm'
 import { DateTime } from 'luxon'
 import type { AppDb } from '../db/client'
@@ -17,30 +16,39 @@ const KEY_CLIENT_ID = 'google.clientId'
 const KEY_CLIENT_SECRET = 'google.clientSecretEnc'
 const CONNECT_TIMEOUT_MS = 5 * 60 * 1000
 
-function encryptSecret(plain: string): Buffer {
-  if (safeStorage.isEncryptionAvailable()) return safeStorage.encryptString(plain)
+export interface GoogleAuthOptions {
+  redirectUri?: string
+  encryptSecret?: (plain: string) => Buffer
+  decryptSecret?: (value: Buffer) => string
+  openExternal?: (url: string) => Promise<void> | void
+}
+
+function plainEncryptSecret(plain: string): Buffer {
   return Buffer.from(`plain:${plain}`, 'utf8')
 }
 
-function decryptSecret(buf: Buffer): string {
+function plainDecryptSecret(buf: Buffer): string {
   const asString = buf.toString('utf8')
   if (asString.startsWith('plain:')) return asString.slice(6)
-  return safeStorage.decryptString(buf)
+  throw new Error('Encrypted Google credential requires a desktop keychain')
 }
 
 function b64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-export function createGoogleAuth(db: AppDb, settings: SettingsService) {
+export function createGoogleAuth(db: AppDb, settings: SettingsService, options: GoogleAuthOptions = {}) {
+  const encrypt = options.encryptSecret ?? plainEncryptSecret
+  const decrypt = options.decryptSecret ?? plainDecryptSecret
   let connectInFlight = false
+  let webConnect: { state: string; verifier: string; redirectUri: string } | null = null
 
   function getCredentials(): { clientId: string; clientSecret: string } | null {
     const clientId = settings.getRaw(KEY_CLIENT_ID)
     const secretB64 = settings.getRaw(KEY_CLIENT_SECRET)
     if (!clientId || !secretB64) return null
     try {
-      return { clientId, clientSecret: decryptSecret(Buffer.from(secretB64, 'base64')) }
+      return { clientId, clientSecret: decrypt(Buffer.from(secretB64, 'base64')) }
     } catch {
       return null
     }
@@ -48,7 +56,7 @@ export function createGoogleAuth(db: AppDb, settings: SettingsService) {
 
   function setCredentials(clientId: string, clientSecret: string): void {
     settings.setRaw(KEY_CLIENT_ID, clientId.trim())
-    settings.setRaw(KEY_CLIENT_SECRET, encryptSecret(clientSecret.trim()).toString('base64'))
+    settings.setRaw(KEY_CLIENT_SECRET, encrypt(clientSecret.trim()).toString('base64'))
   }
 
   function isConfigured(): boolean {
@@ -64,15 +72,52 @@ export function createGoogleAuth(db: AppDb, settings: SettingsService) {
   }
 
   /** Loopback OAuth flow: opens the system browser, waits for the redirect. */
-  async function connect(): Promise<{ email: string }> {
+  async function connect(): Promise<{ email: string; authUrl?: string }> {
     const creds = getCredentials()
     if (!creds) throw new AppError('NOT_CONFIGURED', 'Enter your Google OAuth client ID and secret first')
+    if (options.redirectUri) {
+      if (connectInFlight) throw new AppError('BUSY', 'A Google sign-in is already in progress')
+      connectInFlight = true
+      const verifier = b64url(crypto.randomBytes(32))
+      const challenge = b64url(crypto.createHash('sha256').update(verifier).digest())
+      const state = b64url(crypto.randomBytes(24))
+      const client = new OAuth2Client({clientId: creds.clientId, clientSecret: creds.clientSecret, redirectUri: options.redirectUri})
+      const authUrl = client.generateAuthUrl({
+        access_type: 'offline',
+        prompt: 'consent',
+        scope: SCOPES,
+        state,
+        code_challenge_method: CodeChallengeMethod.S256,
+        code_challenge: challenge
+      })
+      webConnect = {state, verifier, redirectUri: options.redirectUri}
+      return {email: '', authUrl}
+    }
     if (connectInFlight) throw new AppError('BUSY', 'A Google sign-in is already in progress')
     connectInFlight = true
     try {
       const code = await waitForAuthCode(creds)
       const account = await exchangeAndStore(creds, code.code, code.redirectUri, code.verifier)
       return { email: account.email }
+    } finally {
+      connectInFlight = false
+    }
+  }
+
+  async function completeWebConnect(callbackUrl: string): Promise<{ email: string }> {
+    const pending = webConnect
+    if (!pending) throw new AppError('AUTH_STATE', 'No Google sign-in is pending')
+    try {
+      const url = new URL(callbackUrl)
+      if (url.searchParams.get('state') !== pending.state) throw new AppError('AUTH_STATE', 'Invalid Google sign-in state')
+      webConnect = null
+      const error = url.searchParams.get('error')
+      if (error) throw new AppError('AUTH_DENIED', `Google sign-in failed: ${error}`)
+      const code = url.searchParams.get('code')
+      if (!code) throw new AppError('AUTH_CODE', 'Google did not return an authorization code')
+      const creds = getCredentials()
+      if (!creds) throw new AppError('NOT_CONFIGURED', 'Google credentials are missing')
+      return await exchangeAndStore(creds, code, pending.redirectUri, pending.verifier)
     } finally {
       connectInFlight = false
     }
@@ -132,7 +177,12 @@ export function createGoogleAuth(db: AppDb, settings: SettingsService) {
           code_challenge_method: CodeChallengeMethod.S256,
           code_challenge: challenge
         })
-        void shell.openExternal(authUrl)
+        if (!options.openExternal) {
+          cleanup()
+          reject(new AppError('UNSUPPORTED', 'Desktop browser integration is unavailable'))
+          return
+        }
+        void options.openExternal(authUrl)
       })
       server.on('error', (err) => {
         cleanup()
@@ -157,7 +207,7 @@ export function createGoogleAuth(db: AppDb, settings: SettingsService) {
     const profile = (await userinfo.json()) as { email?: string }
     const email = profile.email ?? 'unknown'
 
-    const enc = encryptSecret(tokens.refresh_token)
+    const enc = encrypt(tokens.refresh_token)
     const existing = db.select().from(googleAccounts).where(eq(googleAccounts.email, email)).all()
     if (existing.length > 0) {
       db.update(googleAccounts)
@@ -180,7 +230,7 @@ export function createGoogleAuth(db: AppDb, settings: SettingsService) {
     const [account] = db.select().from(googleAccounts).where(eq(googleAccounts.id, accountId)).all()
     if (!account?.refreshTokenEnc) throw notFound('Google account')
     const client = new OAuth2Client({ clientId: creds.clientId, clientSecret: creds.clientSecret })
-    client.setCredentials({ refresh_token: decryptSecret(Buffer.from(account.refreshTokenEnc)) })
+    client.setCredentials({ refresh_token: decrypt(Buffer.from(account.refreshTokenEnc)) })
     return client
   }
 
@@ -206,7 +256,7 @@ export function createGoogleAuth(db: AppDb, settings: SettingsService) {
     })
   }
 
-  return { isConfigured, setCredentials, connect, listAccounts, getAuthedClient, markAuthError, disconnect }
+  return { isConfigured, setCredentials, connect, completeWebConnect, listAccounts, getAuthedClient, markAuthError, disconnect }
 }
 
 export type GoogleAuth = ReturnType<typeof createGoogleAuth>

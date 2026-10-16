@@ -47,25 +47,25 @@ export function Header() {
   const weekStartsOn = settings?.weekStartsOn ?? 0
   const timeFormat = settings?.timeFormat ?? '12h'
   return (
-    <header className="flex items-center gap-2 px-4 pt-5 pb-4 min-[1500px]:gap-3 min-[1500px]:px-5">
+    <header className="flex flex-wrap items-center gap-1 px-2 pt-2 pb-2 min-[640px]:flex-nowrap min-[640px]:gap-2 min-[640px]:px-4 min-[640px]:pt-5 min-[640px]:pb-4 min-[1500px]:gap-3 min-[1500px]:px-5">
       {/* Today + a big clock (the header is the only clock since the home
           screen dropped its clock tile); scales down so everything still
           fits on 1280-wide displays */}
-      <button type="button" onClick={goToday} className="pressable flex shrink-0 items-center gap-3 text-left min-[1500px]:gap-4">
+      <button type="button" onClick={goToday} className="pressable flex min-w-0 shrink items-center gap-1.5 text-left min-[640px]:gap-3 min-[1500px]:gap-4">
         <div>
-          <div className="font-display text-[2.05rem] leading-none font-semibold tracking-tight min-[1500px]:text-[2.6rem]">
+          <div className="font-display truncate text-[1.35rem] leading-none font-semibold tracking-tight min-[640px]:text-[2.05rem] min-[1500px]:text-[2.6rem]">
             {now.toFormat('cccc')}
           </div>
-          <div className="mt-1 text-base font-bold text-ink-soft min-[1500px]:text-lg">{now.toFormat('LLLL d')}</div>
+          <div className="mt-0.5 text-xs font-bold text-ink-soft min-[640px]:mt-1 min-[640px]:text-base min-[1500px]:text-lg">{now.toFormat('LLLL d')}</div>
         </div>
         <div className="w-px self-stretch bg-ink-faint/30" />
-        <div className="font-display text-[2.05rem] leading-none font-semibold tracking-tight tabular-nums min-[1500px]:text-[3.1rem]">
+        <div className="font-display shrink-0 text-[1.35rem] leading-none font-semibold tracking-tight tabular-nums min-[640px]:text-[2.05rem] min-[1500px]:text-[3.1rem]">
           {timeFormat === '24h' ? (
             now.toFormat('HH:mm')
           ) : (
             <>
               {now.toFormat('h:mm')}
-              <span className="ml-1 text-lg font-bold text-ink-soft min-[1500px]:ml-1.5 min-[1500px]:text-2xl">
+              <span className="ml-0.5 text-xs font-bold text-ink-soft min-[640px]:ml-1 min-[640px]:text-lg min-[1500px]:ml-1.5 min-[1500px]:text-2xl">
                 {now.toFormat('a').toLowerCase()}
               </span>
             </>
@@ -73,13 +73,15 @@ export function Header() {
         </div>
       </button>
 
-      <WeatherButton />
+      <div className="shrink-0 [&_button]:h-11 [&_button]:w-11 min-[640px]:[&_button]:h-auto min-[640px]:[&_button]:w-auto">
+        <WeatherButton />
+      </div>
 
-      <div className="flex-1" />
+      <div className="hidden flex-1 min-[640px]:block" />
 
       {/* person filter: compact avatar circles, never clipped (overlap when the family is large) */}
       {people.length > 0 && (
-        <div className={`flex shrink-0 items-center ${people.length >= 4 ? '-space-x-2' : 'gap-1.5'}`}>
+        <div className={`hidden shrink-0 items-center min-[640px]:flex ${people.length >= 4 ? '-space-x-2' : 'gap-1.5'}`}>
           {people.map((p) => {
             const hidden = hiddenPeople.includes(p.id)
             return (
@@ -103,7 +105,7 @@ export function Header() {
 
       {/* period nav (removed from layout where it isn't meaningful — space matters here) */}
       {view !== 'lists' && view !== 'home' && (
-        <div className="flex shrink-0 items-center gap-1 rounded-2xl bg-paper-deep/70 p-1">
+        <div className="hidden shrink-0 items-center gap-1 rounded-2xl bg-paper-deep/70 p-1 min-[640px]:flex">
           <IconButton label="Previous" onClick={() => step(-1)}>
             <ChevronLeftIcon />
           </IconButton>
@@ -120,10 +122,11 @@ export function Header() {
         </div>
       )}
 
-      <SegmentedControl
-        value={view}
-        onChange={setView}
-        options={[
+      <div className="order-last w-full min-w-0 overflow-x-auto [scrollbar-width:none] min-[640px]:order-none min-[640px]:w-auto">
+        <SegmentedControl
+          value={view}
+          onChange={setView}
+          options={[
           { value: 'home', label: 'Home' },
           { value: 'day', label: 'Day' },
           { value: 'week', label: 'Week' },
@@ -131,8 +134,9 @@ export function Header() {
           { value: 'agenda', label: 'Agenda' },
           { value: 'chores', label: 'Chores' },
           { value: 'lists', label: 'Lists' }
-        ]}
-      />
+          ]}
+        />
+      </div>
 
       <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
         <GearIcon size={26} />

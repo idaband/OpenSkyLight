@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, safeStorage, shell } from 'electron'
 import { join } from 'path'
 import { DateTime } from 'luxon'
 import { openDatabase } from './db/client'
@@ -58,7 +58,14 @@ if (!gotLock) {
     const cameraService = createCameraService(settings)
     app.on('will-quit', () => cameraService.shutdown())
     const choresService = createChoresService(db, deviceTz)
-    const googleAuth = createGoogleAuth(db, settings)
+    const googleAuth = createGoogleAuth(db, settings, {
+      encryptSecret: (value) => (safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(value) : Buffer.from(`plain:${value}`, 'utf8')),
+      decryptSecret: (value) => {
+        const raw = value.toString('utf8')
+        return raw.startsWith('plain:') ? raw.slice(6) : safeStorage.decryptString(value)
+      },
+      openExternal: (url) => shell.openExternal(url)
+    })
     const googleSync = createGoogleSync({ db, auth: googleAuth, deviceTz })
     const outbox = createOutboxWorker({
       db,
@@ -113,7 +120,8 @@ if (!gotLock) {
     channelTable = buildChannelTable(services, {
       version: app.getVersion(),
       platform: process.platform,
-      zone: DateTime.local().zoneName ?? 'UTC'
+      zone: DateTime.local().zoneName ?? 'UTC',
+      webMode: false
     })
     registerIpcHandlers(services, channelTable)
     createMainWindow()

@@ -16,6 +16,7 @@ import {
   useRewardMutations,
   useRewards,
   useGoogleMutations,
+  useAppInfo,
   useGoogleStatus,
   useIcsMutations,
   usePeople,
@@ -245,19 +246,32 @@ function SyncStatusRow() {
 }
 
 function GoogleSection() {
+  const { data: appInfo } = useAppInfo()
   const { data: status } = useGoogleStatus()
   const google = useGoogleMutations()
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null)
   const { data: remoteCals = [], isLoading: remoteLoading } = useRemoteCalendars(expandedAccount)
+  const webMode = appInfo?.webMode === true
 
   if (!status) return null
 
   const saveAndConnect = (): void => {
+    const authWindow = webMode ? window.open('about:blank', 'openskylight-google-login', 'popup,width=600,height=700') : null
     google.setCredentials.mutate(
       { clientId, clientSecret },
-      { onSuccess: () => google.connect.mutate(undefined) }
+      {
+        onSuccess: () =>
+          google.connect.mutate(undefined, {
+            onSuccess: (result) => {
+              if (result.authUrl) {
+                if (authWindow) authWindow.location.href = result.authUrl
+                else window.location.assign(result.authUrl)
+              }
+            }
+          })
+      }
     )
   }
 
@@ -268,9 +282,15 @@ function GoogleSection() {
         <div className="flex flex-col gap-3 rounded-2xl bg-paper-deep/50 p-4">
           <p className="text-base font-semibold text-ink-soft">
             Two-way sync uses your own (free) Google Cloud project. Create a{' '}
-            <span className="font-extrabold">Desktop app</span> OAuth client in the Google Cloud console, enable the
-            Calendar API, and paste the credentials here.
+            <span className="font-extrabold">{webMode ? 'Web application' : 'Desktop app'}</span> OAuth client in the
+            Google Cloud console, enable the Calendar API, and paste the client ID and secret here.
           </p>
+          {webMode && (
+            <p className="text-sm font-semibold text-ink-soft">
+              Add the Docker callback URL from your deployment configuration to Google Cloud, then click Save &amp;
+              connect. Google sign-in will open in a separate window.
+            </p>
+          )}
           <OskInput value={clientId} onChange={setClientId} placeholder="OAuth client ID" />
           <OskInput value={clientSecret} onChange={setClientSecret} placeholder="OAuth client secret" />
           <BigButton onClick={saveAndConnect} disabled={clientId.trim().length < 10 || clientSecret.trim().length < 5}>

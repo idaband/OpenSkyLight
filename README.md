@@ -157,9 +157,9 @@ How it works and what to know:
 
 1. Create a free Google Cloud project, enable the **Google Calendar API**
 2. Configure an OAuth consent screen (External, add yourself as a test user)
-3. Create an OAuth client of type **Desktop app**
+3. Create an OAuth client of type **Desktop app** for the installed app, or **Web application** for Docker. For Docker, add `https://your-public-hostname.example.com/api/google/oauth/callback` as an authorized redirect URI.
 4. In the app: Settings → Calendars → paste the client ID + secret → Save & connect
-5. Sign in via the browser window that opens, then choose which calendars to sync
+5. Sign in via the browser window that opens (Docker redirects the current browser tab), then choose which calendars to sync
 
 ### Ideas for later
 
@@ -238,6 +238,7 @@ services:
     environment:
       - PORT=8420
       - OSL_DATA_DIR=/data
+      - OSL_GOOGLE_OAUTH_REDIRECT_URI=https://your-public-hostname.example.com/api/google/oauth/callback
       - OSL_DMZ_PORT=8421
       - OSL_PAIR_BASE_URL=https://your-public-hostname.example.com
       # - OSL_PAIR_API_BASE_URL=https://your-public-hostname.example.com
@@ -282,6 +283,7 @@ docker compose up -d --build
 | `PORT`                       | `8420`                            | Main web listener (kiosk UI + API on LAN)                 |
 | `OSL_DATA_DIR`               | `./data`                          | Directory for persistent runtime data                     |
 | `OSL_DB_PATH`                | `${OSL_DATA_DIR}/openskylight.db` | Explicit SQLite file path                                 |
+| `OSL_GOOGLE_OAUTH_REDIRECT_URI` | unset                         | Public HTTPS Google OAuth callback for Docker web mode   |
 | `OSL_WEB_ROOT`               | `out/web`                         | Built kiosk web bundle path                               |
 | `OSL_DMZ_PORT`               | unset                             | Optional DMZ listener port                                |
 | `OSL_DMZ_SERVE_COMPANION_UI` | `0`                               | `1` = serve companion shell on DMZ listener               |
@@ -300,9 +302,11 @@ adding to Home Screen, open the installed app and scan the kiosk QR again in
 the app's built-in scanner to store token/API in app-local storage.
 
 Then open `http://localhost:8420`.
-This mode uses the same renderer and SQLite-backed services, but desktop-only
-features (native Google OAuth flow, RTSP camera streaming, screensaver folder picker,
-auto-update install) are unavailable in web mode.
+This mode uses the same renderer and SQLite-backed services. Google client ID and
+secret are still entered from the LAN Admin/Settings UI; Docker additionally needs
+the public HTTPS callback above. The remote companion listener remains unable to
+administer Google accounts. Other desktop-only features (RTSP camera streaming,
+screensaver folder picker, auto-update install) are unavailable in web mode.
 
 ## Architecture
 

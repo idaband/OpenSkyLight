@@ -19,6 +19,10 @@ import {createMealsService} from '@main/services/mealsService'
 import {createRssService} from '@main/services/rssService'
 import {createBirdNetService} from '@main/services/birdnetService'
 import {createIcsSync} from '@main/sync/icsSync'
+import {createGoogleAuth} from '@main/sync/googleAuth'
+import {createGoogleSync} from '@main/sync/googleSync'
+import {createOutboxWorker} from '@main/sync/outboxWorker'
+import {createSyncManager} from '@main/sync/scheduler'
 import {AppError} from '@main/services/errors'
 import {buildChannelTable, dispatch, type Services} from '@main/ipc/core'
 import {createCompanionTokens} from '@main/companion/companionTokens'
@@ -110,6 +114,7 @@ export interface WebHttpServerDeps {
     version: string
     surface: ApiSurface
     rpcDispatch: (channel: IpcChannel, payload: unknown) => Promise<unknown>
+    googleOAuthCallback?: (callbackUrl: string) => Promise<{email: string}>
     verifyToken?: (token: string) => boolean
     dmz?: {
         allowedOrigins: string[]
@@ -189,6 +194,32 @@ export function createWebHttpServer(deps: WebHttpServerDeps) {
         const url = req.url ?? '/'
         if (url === '/api/health' && req.method === 'GET') {
             sendJson(res, 200, {app: 'openskylight-web', version: deps.version})
+            return
+        }
+        if (url.startsWith('/api/google/oauth/callback')) {
+            if (deps.surface !== 'lan') {
+                sendJson(res, 404, {ok: false, error: {code: 'NOT_FOUND', message: 'Unknown endpoint'}})
+                return
+            }
+            if (req.method !== 'GET') {
+                sendJson(res, 405, {ok: false, error: {code: 'METHOD', message: 'GET only'}})
+                return
+            }
+            if (!deps.googleOAuthCallback) {
+                sendJson(res, 404, {ok: false, error: {code: 'NOT_FOUND', message: 'Google OAuth is not configured'}})
+                return
+            }
+            const googleOAuthCallback = deps.googleOAuthCallback
+            void (async () => {
+                try {
+                    const result = await googleOAuthCallback(`http://${req.headers.host ?? 'localhost'}${url}`)
+                    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'})
+                    res.end(`<html><body style="font-family:sans-serif;text-align:center;padding-top:4rem"><h2>Connected!</h2><p>${result.email} is connected. You can close this tab.</p></body></html>`)
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Google sign-in failed'
+                    sendJson(res, 400, {ok: false, error: {code: error instanceof AppError ? error.code : 'AUTH_FAILED', message}})
+                }
+            })()
             return
         }
         const rpcMatch = url.match(/^\/api\/rpc\/([^/?]+)$/)
@@ -294,9 +325,18 @@ export async function main(): Promise<void> {
     const settings = createSettingsService(db)
     const tokens = createCompanionTokens(settings)
     const chores = createChoresService(db, deviceTz)
-    const icsSync = createIcsSync({db, deviceTz})
     const broadcast = (_channel: string, _payload: unknown): void => {
     }
+    const googleRedirectUri = process.env.OSL_GOOGLE_OAUTH_REDIRECT_URI?.trim() || undefined
+    const googleAuth = createGoogleAuth(db, settings, {redirectUri: googleRedirectUri})
+    const googleSync = createGoogleSync({db, auth: googleAuth, deviceTz})
+    const outbox = createOutboxWorker({
+        db,
+        sync: googleSync,
+        onConflict: (title) => broadcast('push:syncConflict', {title})
+    })
+    const icsSync = createIcsSync({db, deviceTz})
+    const syncManager = createSyncManager({db, auth: googleAuth, google: googleSync, outbox, ics: icsSync, broadcast})
     const pairBaseUrl = process.env.OSL_PAIR_BASE_URL?.trim() || null
     const pairApiBaseUrl = process.env.OSL_PAIR_API_BASE_URL?.trim() || null
     const pairShellBase = `${(pairBaseUrl ?? `http://localhost:${port}/`).replace(/\/$/, '')}/`
@@ -307,28 +347,10 @@ export async function main(): Promise<void> {
         people: createPeopleService(db),
         calendars: createCalendarService(db),
         events: createEventService(db),
-        googleAuth: {
-            isConfigured: () => false,
-            setCredentials: () => unsupported('Google OAuth setup'),
-            connect: async () => unsupported('Google OAuth setup'),
-            listAccounts: () => [],
-            getAuthedClient: () => unsupported('Google OAuth setup'),
-            markAuthError: () => undefined,
-            disconnect: () => unsupported('Google OAuth setup')
-        },
-        googleSync: {
-            listRemoteCalendars: async () => [],
-            setCalendarSelected: () => unsupported('Google calendar sync'),
-            pullCalendar: async () => false,
-            api: () => unsupported('Google calendar sync')
-        },
+        googleAuth,
+        googleSync,
         icsSync,
-        syncManager: {
-            start: () => undefined,
-            stop: () => undefined,
-            syncNow: () => undefined,
-            getStatus: () => ({state: 'idle', lastError: null, calendars: []})
-        },
+        syncManager,
         weather: createWeatherService(settings),
         auth: createAuthService(settings),
         chores,
@@ -378,7 +400,8 @@ export async function main(): Promise<void> {
     const table = buildChannelTable(services, {
         version: process.env.npm_package_version ?? 'dev',
         platform: process.platform,
-        zone: deviceTz()
+        zone: deviceTz(),
+        webMode: true
     })
 
     const server = createWebHttpServer({
@@ -386,6 +409,11 @@ export async function main(): Promise<void> {
         version: process.env.npm_package_version ?? 'dev',
         surface: 'lan',
         rpcDispatch: (channel, payload) => dispatch(services, table, channel, payload, {gate: 'pin', broadcast}),
+        googleOAuthCallback: async (callbackUrl) => {
+            const result = await googleAuth.completeWebConnect(callbackUrl)
+            syncManager.syncNow()
+            return result
+        },
         verifyToken: tokens.verify
     })
 
@@ -393,6 +421,7 @@ export async function main(): Promise<void> {
         console.log(`[web] OpenSkyLight serving on http://0.0.0.0:${port}`)
         console.log(`[web] Database: ${dbPath}`)
     })
+    syncManager.start()
 
     if (Number.isFinite(dmzPort) && dmzPort > 0) {
         const dmzServer = createWebHttpServer({

@@ -31,7 +31,7 @@ import type {
  * channel and the renderer gets a fully typed `ipcInvoke`.
  */
 export type IpcContract = {
-  'app:getInfo': { req: void; res: { version: string; platform: string; zone: string } }
+  'app:getInfo': { req: void; res: { version: string; platform: string; zone: string; webMode?: boolean } }
   'app:installUpdate': { req: void; res: void }
 
   'settings:getAll': { req: void; res: AppSettings }
@@ -58,7 +58,7 @@ export type IpcContract = {
     res: { configured: boolean; accounts: { id: string; email: string; error: string | null }[] }
   }
   'google:setCredentials': { req: { clientId: string; clientSecret: string }; res: void }
-  'google:connect': { req: void; res: { email: string } }
+  'google:connect': { req: void; res: { email: string; authUrl?: string } }
   'google:disconnect': { req: { accountId: string }; res: void }
   'google:listRemoteCalendars': {
     req: { accountId: string }

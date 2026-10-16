@@ -152,7 +152,7 @@ export async function dispatch<K extends IpcChannel>(
 /** The single channel → {schema, handler} map consumed by ipcMain and HTTP APIs. */
 export function buildChannelTable(
   services: Services,
-  runtimeInfo: { version: string; platform: string; zone: string }
+  runtimeInfo: { version: string; platform: string; zone: string; webMode?: boolean }
 ): ChannelTable {
   const table: ChannelTable = new Map()
   function handle<K extends IpcChannel>(

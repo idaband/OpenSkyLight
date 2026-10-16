@@ -23,7 +23,7 @@ export function DayView() {
   const [mealDate, setMealDate] = useState<string | null>(null)
 
   return (
-    <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-6 pb-28">
+    <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-2 pb-28 min-[640px]:px-6">
       <div className="animate-rise mb-4 flex items-end justify-between">
         <div>
           <div className="font-display text-5xl">{day.toFormat('cccc')}</div>
