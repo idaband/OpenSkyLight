@@ -23,14 +23,14 @@ export function MonthView() {
 
   return (
     <div className="flex h-full flex-col px-6 pb-6">
-      <div className="grid grid-cols-7 gap-x-2 pb-1">
+      <div className="grid grid-cols-7 gap-x-0.5 pb-1 min-[640px]:gap-x-2">
         {days.slice(0, 7).map((d) => (
           <div key={d.toISODate()} className="px-2 text-sm font-extrabold uppercase text-ink-faint">
             {d.toFormat('ccc')}
           </div>
         ))}
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 gap-2">
+      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 gap-0.5 min-[640px]:gap-2">
         {days.map((day, i) => {
           const key = day.toISODate()!
           const occurrences = byDay.get(key) ?? []

@@ -16,7 +16,7 @@ export function AgendaView() {
   const days = eachDay(range, ZONE)
 
   return (
-    <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-6 pb-28">
+    <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-2 pb-28 min-[640px]:px-6">
       <div className="flex flex-col gap-2">
         {days.map((day, i) => {
           const key = day.toISODate()!

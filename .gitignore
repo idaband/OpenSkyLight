@@ -8,3 +8,6 @@ Thumbs.db
 *.log
 .vite/
 coverage/
+.idea/
+data/
+compose.yaml

@@ -31,7 +31,7 @@ import type {
  * channel and the renderer gets a fully typed `ipcInvoke`.
  */
 export type IpcContract = {
-  'app:getInfo': { req: void; res: { version: string; platform: string; zone: string } }
+  'app:getInfo': { req: void; res: { version: string; platform: string; zone: string; webMode?: boolean } }
   'app:installUpdate': { req: void; res: void }
 
   'settings:getAll': { req: void; res: AppSettings }
@@ -58,7 +58,7 @@ export type IpcContract = {
     res: { configured: boolean; accounts: { id: string; email: string; error: string | null }[] }
   }
   'google:setCredentials': { req: { clientId: string; clientSecret: string }; res: void }
-  'google:connect': { req: void; res: { email: string } }
+  'google:connect': { req: void; res: { email: string; authUrl?: string } }
   'google:disconnect': { req: { accountId: string }; res: void }
   'google:listRemoteCalendars': {
     req: { accountId: string }
@@ -167,7 +167,7 @@ export type IpcContract = {
     req: void
     res: { running: boolean; port: number; urls: string[]; pairedCount: number; lastError: string | null }
   }
-  /** Mints a fresh pairing token (parent-gated); the token only ever lives in the URL fragment. */
+  /** Mints a fresh pairing token (parent-gated) encoded in the pairing URL. */
   'companion:issueToken': { req: void; res: { url: string } }
   'companion:unpairAll': { req: void; res: void }
 

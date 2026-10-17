@@ -22,7 +22,7 @@ export function WeekView() {
   const [mealDate, setMealDate] = useState<string | null>(null)
 
   return (
-    <div className="grid h-full grid-cols-7 gap-3 px-6 pb-6">
+    <div className="grid h-full grid-cols-7 gap-1 px-1 pb-6 min-[640px]:gap-3 min-[640px]:px-6">
       {days.map((day, i) => {
         const key = day.toISODate()!
         const occurrences = byDay.get(key) ?? []

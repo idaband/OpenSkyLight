@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, safeStorage, shell } from 'electron'
 import { join } from 'path'
 import { DateTime } from 'luxon'
 import { openDatabase } from './db/client'
@@ -6,13 +6,10 @@ import { createSettingsService } from './services/settingsService'
 import { createPeopleService } from './services/peopleService'
 import { createCalendarService } from './services/calendarService'
 import { createEventService } from './services/eventService'
+import { buildChannelTable, dispatch, type ChannelTable, type Services } from './ipc/core'
 import {
-  buildChannelTable,
-  dispatch,
   registerIpcHandlers,
-  broadcast,
-  type ChannelTable,
-  type Services
+  broadcast
 } from './ipc/router'
 import { createCompanionTokens } from './companion/companionTokens'
 import { createCompanionServer } from './companion/companionServer'
@@ -61,7 +58,14 @@ if (!gotLock) {
     const cameraService = createCameraService(settings)
     app.on('will-quit', () => cameraService.shutdown())
     const choresService = createChoresService(db, deviceTz)
-    const googleAuth = createGoogleAuth(db, settings)
+    const googleAuth = createGoogleAuth(db, settings, {
+      encryptSecret: (value) => (safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(value) : Buffer.from(`plain:${value}`, 'utf8')),
+      decryptSecret: (value) => {
+        const raw = value.toString('utf8')
+        return raw.startsWith('plain:') ? raw.slice(6) : safeStorage.decryptString(value)
+      },
+      openExternal: (url) => shell.openExternal(url)
+    })
     const googleSync = createGoogleSync({ db, auth: googleAuth, deviceTz })
     const outbox = createOutboxWorker({
       db,
@@ -84,7 +88,8 @@ if (!gotLock) {
     const companion = createCompanionServer({
       settings,
       tokens: createCompanionTokens(settings),
-      dispatch: (channel, payload) => dispatch(services, channelTable, channel, payload, { gate: 'none' }),
+      dispatch: (channel, payload) =>
+        dispatch(services, channelTable, channel, payload, { gate: 'none', broadcast }),
       version: app.getVersion(),
       staticRoot: join(__dirname, '../companion')
     })
@@ -112,7 +117,12 @@ if (!gotLock) {
       birdnet: createBirdNetService(),
       companion
     }
-    channelTable = buildChannelTable(services)
+    channelTable = buildChannelTable(services, {
+      version: app.getVersion(),
+      platform: process.platform,
+      zone: DateTime.local().zoneName ?? 'UTC',
+      webMode: false
+    })
     registerIpcHandlers(services, channelTable)
     createMainWindow()
     syncManager.start()
